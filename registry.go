@@ -293,6 +293,21 @@ func (r *Registry[F]) resolveLatestStable(version string) (*FeatureSet[F], bool)
 	if latest == nil {
 		return nil, false
 	}
+	if version != "" && version[0] >= '0' && version[0] <= '9' {
+		if !(len(version) > 1 && version[0] == '0' && version[1] >= '0' && version[1] <= '9') {
+			var major uint64
+			for i := 0; i < len(version); i++ {
+				c := version[i]
+				if c < '0' || c > '9' {
+					if major > latest.major && i+4 == len(version) && c == '.' && version[i+1] >= '0' && version[i+1] <= '9' && version[i+2] == '.' && version[i+3] >= '0' && version[i+3] <= '9' {
+						return newFeatureSet(version, latest.features), true
+					}
+					break
+				}
+				major = major*10 + uint64(c-'0')
+			}
+		}
+	}
 	major, minor, patch, ok := parseStableCore(version)
 	if !ok {
 		return nil, false
