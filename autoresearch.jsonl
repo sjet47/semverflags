@@ -1,0 +1,1 @@
+{"type":"config","name":"Optimize semverflags Resolve cold latest benchmark","metricName":"resolve_10000_ns","metricUnit":"ns","bestDirection":"lower"}
