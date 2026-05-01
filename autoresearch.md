@@ -32,5 +32,9 @@ The benchmark intentionally calls unexported `resolve` so each iteration measure
 - Keep code maintainable; primary metric is king, but avoid benchmark-only hacks.
 
 ## What's Been Tried
-- Baseline before optimization: current implementation parses version then linearly scans all registered entries, constructing a fresh `map[F]struct{}` for every cold resolve.
-- Planned first direction: build frozen version breakpoint/index data in `Freeze()`, add a latest-version fast path, and return shared immutable FeatureSet backing where possible.
+- Baseline before optimization: current implementation parses version then linearly scans all registered entries, constructing a fresh `map[F]struct{}` for every cold resolve. Baseline primary was ~409,491 ns/op for 10,000 features.
+- Kept: `Freeze()` now precomputes the latest interval as an immutable index. For versions at or beyond the max registered `since`/`until` breakpoint, active features are exactly unbounded ranges, so latest resolves can share that map instead of scanning all entries.
+- Kept: internal no-cache `resolve` reads the immutable latest index without locking; exported `Resolve` still has its cache locking layer.
+- Kept: latest stable versions use a conservative fast parser for `x.y.z` with optional build metadata before falling back to Masterminds semver. This reduced the primary to ~24 ns/op and 1 allocation.
+- Discarded: caching numeric latest breakpoint fields and inlining FeatureSet construction; no rounded primary improvement.
+- Discarded: index-based and compare-fused stable parsers; both regressed.

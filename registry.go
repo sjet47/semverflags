@@ -358,6 +358,27 @@ func parseStableCore(version string) (uint64, uint64, uint64, bool) {
 	if i >= len(version) || version[i] < '0' || version[i] > '9' {
 		return 0, 0, 0, false
 	}
+	if i+1 < len(version) && version[i+1] == '.' {
+		minor := uint64(version[i] - '0')
+		patchStart := i + 2
+		if patchStart < len(version) && version[patchStart] >= '0' && version[patchStart] <= '9' {
+			patch := uint64(version[patchStart] - '0')
+			afterPatch := patchStart + 1
+			if afterPatch == len(version) {
+				return major, minor, patch, true
+			}
+			if version[afterPatch] == '+' && afterPatch+1 < len(version) {
+				for j := afterPatch + 1; j < len(version); j++ {
+					c := version[j]
+					if (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '.' {
+						continue
+					}
+					return 0, 0, 0, false
+				}
+				return major, minor, patch, true
+			}
+		}
+	}
 	if i+1 < len(version) && version[i] == '0' && version[i+1] >= '0' && version[i+1] <= '9' {
 		return 0, 0, 0, false
 	}
