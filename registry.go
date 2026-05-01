@@ -335,57 +335,72 @@ func (r *Registry[F]) computeFeatureSetLocked(version string, parsed *semver.Ver
 }
 
 func parseStableCore(version string) (uint64, uint64, uint64, bool) {
-	major, rest, ok := parseCorePart(version)
-	if !ok || len(rest) == 0 || rest[0] != '.' {
+	if version == "" || version[0] < '0' || version[0] > '9' {
 		return 0, 0, 0, false
 	}
-	minor, rest, ok := parseCorePart(rest[1:])
-	if !ok || len(rest) == 0 || rest[0] != '.' {
+
+	var major uint64
+	i := 0
+	if len(version) > 1 && version[0] == '0' && version[1] >= '0' && version[1] <= '9' {
 		return 0, 0, 0, false
 	}
-	patch, rest, ok := parseCorePart(rest[1:])
-	if !ok {
+	for ; i < len(version); i++ {
+		c := version[i]
+		if c < '0' || c > '9' {
+			break
+		}
+		major = major*10 + uint64(c-'0')
+	}
+	if i >= len(version) || version[i] != '.' {
 		return 0, 0, 0, false
 	}
-	if rest == "" {
+	i++
+	if i >= len(version) || version[i] < '0' || version[i] > '9' {
+		return 0, 0, 0, false
+	}
+	if i+1 < len(version) && version[i] == '0' && version[i+1] >= '0' && version[i+1] <= '9' {
+		return 0, 0, 0, false
+	}
+	var minor uint64
+	for ; i < len(version); i++ {
+		c := version[i]
+		if c < '0' || c > '9' {
+			break
+		}
+		minor = minor*10 + uint64(c-'0')
+	}
+	if i >= len(version) || version[i] != '.' {
+		return 0, 0, 0, false
+	}
+	i++
+	if i >= len(version) || version[i] < '0' || version[i] > '9' {
+		return 0, 0, 0, false
+	}
+	if i+1 < len(version) && version[i] == '0' && version[i+1] >= '0' && version[i+1] <= '9' {
+		return 0, 0, 0, false
+	}
+	var patch uint64
+	for ; i < len(version); i++ {
+		c := version[i]
+		if c < '0' || c > '9' {
+			break
+		}
+		patch = patch*10 + uint64(c-'0')
+	}
+	if i == len(version) {
 		return major, minor, patch, true
 	}
-	if rest[0] != '+' {
+	if version[i] != '+' || i+1 == len(version) {
 		return 0, 0, 0, false
 	}
-	if len(rest) == 1 {
-		return 0, 0, 0, false
-	}
-	for i := 1; i < len(rest); i++ {
-		c := rest[i]
+	for i++; i < len(version); i++ {
+		c := version[i]
 		if (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '.' {
 			continue
 		}
 		return 0, 0, 0, false
 	}
 	return major, minor, patch, true
-}
-
-func parseCorePart(s string) (uint64, string, bool) {
-	if s == "" {
-		return 0, "", false
-	}
-	if s[0] < '0' || s[0] > '9' {
-		return 0, "", false
-	}
-	if len(s) > 1 && s[0] == '0' && s[1] >= '0' && s[1] <= '9' {
-		return 0, "", false
-	}
-
-	var value uint64
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c < '0' || c > '9' {
-			return value, s[i:], true
-		}
-		value = value*10 + uint64(c-'0')
-	}
-	return value, "", true
 }
 
 func compareStableCoreToVersion(major, minor, patch uint64, version *semver.Version) int {
