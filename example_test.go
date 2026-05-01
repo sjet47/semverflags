@@ -1,4 +1,4 @@
-package main
+package semverflags_test
 
 import (
 	"fmt"
@@ -7,15 +7,15 @@ import (
 	"github.com/sjet47/semverflags"
 )
 
-type Feature string
+func Example() {
+	type Feature string
 
-const (
-	FeatureDarkMode    Feature = "dark_mode"
-	FeaturePushNotify  Feature = "push_notify"
-	FeatureLegacyLogin Feature = "legacy_login"
-)
+	const (
+		FeatureDarkMode    Feature = "dark_mode"
+		FeaturePushNotify  Feature = "push_notify"
+		FeatureLegacyLogin Feature = "legacy_login"
+	)
 
-func main() {
 	registry := semverflags.NewRegistry[Feature](semverflags.WithIgnorePrerelease())
 	registry.Register(FeatureDarkMode, "1.2.0")
 	registry.Register(FeaturePushNotify, "1.5.0")
@@ -36,4 +36,14 @@ func main() {
 	for _, featureRange := range registry.Dump() {
 		fmt.Printf("%s: [%s, %s)\n", featureRange.Feature, featureRange.Since, featureRange.Until)
 	}
+
+	// Output:
+	// version: 1.5.0
+	// has dark mode: true
+	// has push notify: true
+	// has legacy login: true
+	// all features: [dark_mode legacy_login push_notify]
+	// dark_mode: [1.2.0, latest)
+	// legacy_login: [1.0.0, 2.0.0)
+	// push_notify: [1.5.0, latest)
 }
