@@ -150,6 +150,10 @@ func (r *Registry[F]) Resolve(version string) (*FeatureSet[F], error) {
 func (r *Registry[F]) resolve(version string) (*FeatureSet[F], error) {
 	r.mustNotBeNil()
 
+	if set, ok := r.resolveLatestStable(version); ok {
+		return set, nil
+	}
+
 	parsed, key, err := r.parseResolveVersion(version)
 	if err != nil {
 		return nil, err
@@ -271,6 +275,23 @@ func (r *Registry[F]) buildLatestIndexLocked() {
 	r.latestFeatures = latestFeatures
 }
 
+func (r *Registry[F]) resolveLatestStable(version string) (*FeatureSet[F], bool) {
+	major, minor, patch, ok := parseStableCore(version)
+	if !ok {
+		return nil, false
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.frozen || r.latestBreakpoint == nil {
+		return nil, false
+	}
+	if compareStableCoreToVersion(major, minor, patch, r.latestBreakpoint) < 0 {
+		return nil, false
+	}
+	return newFeatureSet(version, r.latestFeatures), true
+}
+
 func (r *Registry[F]) resolveParsed(version string, parsed *semver.Version) *FeatureSet[F] {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -302,6 +323,85 @@ func (r *Registry[F]) computeFeatureSetLocked(version string, parsed *semver.Ver
 		features[feature] = struct{}{}
 	}
 	return newFeatureSet(version, features)
+}
+
+func parseStableCore(version string) (uint64, uint64, uint64, bool) {
+	major, rest, ok := parseCorePart(version)
+	if !ok || len(rest) == 0 || rest[0] != '.' {
+		return 0, 0, 0, false
+	}
+	minor, rest, ok := parseCorePart(rest[1:])
+	if !ok || len(rest) == 0 || rest[0] != '.' {
+		return 0, 0, 0, false
+	}
+	patch, rest, ok := parseCorePart(rest[1:])
+	if !ok {
+		return 0, 0, 0, false
+	}
+	if rest == "" {
+		return major, minor, patch, true
+	}
+	if rest[0] != '+' {
+		return 0, 0, 0, false
+	}
+	if len(rest) == 1 {
+		return 0, 0, 0, false
+	}
+	for i := 1; i < len(rest); i++ {
+		c := rest[i]
+		if (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '.' {
+			continue
+		}
+		return 0, 0, 0, false
+	}
+	return major, minor, patch, true
+}
+
+func parseCorePart(s string) (uint64, string, bool) {
+	if s == "" {
+		return 0, "", false
+	}
+	if s[0] < '0' || s[0] > '9' {
+		return 0, "", false
+	}
+	if len(s) > 1 && s[0] == '0' && s[1] >= '0' && s[1] <= '9' {
+		return 0, "", false
+	}
+
+	var value uint64
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return value, s[i:], true
+		}
+		value = value*10 + uint64(c-'0')
+	}
+	return value, "", true
+}
+
+func compareStableCoreToVersion(major, minor, patch uint64, version *semver.Version) int {
+	if major != version.Major() {
+		if major < version.Major() {
+			return -1
+		}
+		return 1
+	}
+	if minor != version.Minor() {
+		if minor < version.Minor() {
+			return -1
+		}
+		return 1
+	}
+	if patch != version.Patch() {
+		if patch < version.Patch() {
+			return -1
+		}
+		return 1
+	}
+	if version.Prerelease() != "" {
+		return 1
+	}
+	return 0
 }
 
 func mustStrictVersion(version string) *semver.Version {
