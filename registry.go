@@ -26,14 +26,18 @@ type FeatureRange[F comparable] struct {
 
 // Registry stores feature version ranges. After Freeze it is read-only and safe
 // for concurrent Resolve calls.
+type latestIndex[F comparable] struct {
+	breakpoint *semver.Version
+	features   map[F]struct{}
+}
+
 type Registry[F comparable] struct {
-	mu               sync.RWMutex
-	opts             options
-	frozen           bool
-	entries          map[F]featureEntry
-	cache            map[string]*FeatureSet[F]
-	latestBreakpoint *semver.Version
-	latestFeatures   map[F]struct{}
+	mu      sync.RWMutex
+	opts    options
+	frozen  bool
+	entries map[F]featureEntry
+	cache   map[string]*FeatureSet[F]
+	latest  *latestIndex[F]
 }
 
 // NewRegistry creates an empty registry.
@@ -258,38 +262,43 @@ func (r *Registry[F]) parseResolveVersion(version string) (*semver.Version, stri
 }
 
 func (r *Registry[F]) buildLatestIndexLocked() {
-	r.latestBreakpoint = nil
+	var breakpoint *semver.Version
 	latestFeatures := make(map[F]struct{})
 	for feature, entry := range r.entries {
-		if r.latestBreakpoint == nil || entry.since.Compare(r.latestBreakpoint) > 0 {
-			r.latestBreakpoint = entry.since
+		if breakpoint == nil || entry.since.Compare(breakpoint) > 0 {
+			breakpoint = entry.since
 		}
 		if entry.until != nil {
-			if entry.until.Compare(r.latestBreakpoint) > 0 {
-				r.latestBreakpoint = entry.until
+			if entry.until.Compare(breakpoint) > 0 {
+				breakpoint = entry.until
 			}
 			continue
 		}
 		latestFeatures[feature] = struct{}{}
 	}
-	r.latestFeatures = latestFeatures
+	if breakpoint == nil {
+		r.latest = nil
+		return
+	}
+	r.latest = &latestIndex[F]{
+		breakpoint: breakpoint,
+		features:   latestFeatures,
+	}
 }
 
 func (r *Registry[F]) resolveLatestStable(version string) (*FeatureSet[F], bool) {
+	latest := r.latest
+	if latest == nil {
+		return nil, false
+	}
 	major, minor, patch, ok := parseStableCore(version)
 	if !ok {
 		return nil, false
 	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if !r.frozen || r.latestBreakpoint == nil {
+	if compareStableCoreToVersion(major, minor, patch, latest.breakpoint) < 0 {
 		return nil, false
 	}
-	if compareStableCoreToVersion(major, minor, patch, r.latestBreakpoint) < 0 {
-		return nil, false
-	}
-	return newFeatureSet(version, r.latestFeatures), true
+	return newFeatureSet(version, latest.features), true
 }
 
 func (r *Registry[F]) resolveParsed(version string, parsed *semver.Version) *FeatureSet[F] {
@@ -299,8 +308,8 @@ func (r *Registry[F]) resolveParsed(version string, parsed *semver.Version) *Fea
 }
 
 func (r *Registry[F]) resolveParsedLocked(version string, parsed *semver.Version) *FeatureSet[F] {
-	if r.frozen && r.latestBreakpoint != nil && parsed.Compare(r.latestBreakpoint) >= 0 {
-		return newFeatureSet(version, r.latestFeatures)
+	if r.frozen && r.latest != nil && parsed.Compare(r.latest.breakpoint) >= 0 {
+		return newFeatureSet(version, r.latest.features)
 	}
 	return r.computeFeatureSetLocked(version, parsed)
 }
