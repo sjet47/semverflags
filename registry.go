@@ -27,11 +27,13 @@ type FeatureRange[F comparable] struct {
 // Registry stores feature version ranges. After Freeze it is read-only and safe
 // for concurrent Resolve calls.
 type Registry[F comparable] struct {
-	mu      sync.RWMutex
-	opts    options
-	frozen  bool
-	entries map[F]featureEntry
-	cache   map[string]*FeatureSet[F]
+	mu               sync.RWMutex
+	opts             options
+	frozen           bool
+	entries          map[F]featureEntry
+	cache            map[string]*FeatureSet[F]
+	latestBreakpoint *semver.Version
+	latestFeatures   map[F]struct{}
 }
 
 // NewRegistry creates an empty registry.
@@ -106,6 +108,7 @@ func (r *Registry[F]) Freeze() {
 		r.entries = make(map[F]featureEntry)
 	}
 	r.cache = make(map[string]*FeatureSet[F])
+	r.buildLatestIndexLocked()
 	r.frozen = true
 }
 
@@ -139,7 +142,7 @@ func (r *Registry[F]) Resolve(version string) (*FeatureSet[F], error) {
 	if set, ok := r.cache[key]; ok {
 		return set, nil
 	}
-	set := r.computeFeatureSetLocked(key, parsed)
+	set := r.resolveParsedLocked(key, parsed)
 	r.cache[key] = set
 	return set, nil
 }
@@ -250,8 +253,35 @@ func (r *Registry[F]) parseResolveVersion(version string) (*semver.Version, stri
 	return withoutPrerelease, withoutPrerelease.String(), nil
 }
 
+func (r *Registry[F]) buildLatestIndexLocked() {
+	r.latestBreakpoint = nil
+	latestFeatures := make(map[F]struct{})
+	for feature, entry := range r.entries {
+		if r.latestBreakpoint == nil || entry.since.Compare(r.latestBreakpoint) > 0 {
+			r.latestBreakpoint = entry.since
+		}
+		if entry.until != nil {
+			if entry.until.Compare(r.latestBreakpoint) > 0 {
+				r.latestBreakpoint = entry.until
+			}
+			continue
+		}
+		latestFeatures[feature] = struct{}{}
+	}
+	r.latestFeatures = latestFeatures
+}
+
 func (r *Registry[F]) resolveParsed(version string, parsed *semver.Version) *FeatureSet[F] {
-	return r.computeFeatureSet(version, parsed)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.resolveParsedLocked(version, parsed)
+}
+
+func (r *Registry[F]) resolveParsedLocked(version string, parsed *semver.Version) *FeatureSet[F] {
+	if r.frozen && r.latestBreakpoint != nil && parsed.Compare(r.latestBreakpoint) >= 0 {
+		return newFeatureSet(version, r.latestFeatures)
+	}
+	return r.computeFeatureSetLocked(version, parsed)
 }
 
 func (r *Registry[F]) computeFeatureSet(version string, parsed *semver.Version) *FeatureSet[F] {
