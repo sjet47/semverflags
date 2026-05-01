@@ -1,10 +1,11 @@
 package semverflags
 
 import (
-	"reflect"
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRegistryResolveRanges(t *testing.T) {
@@ -17,35 +18,23 @@ func TestRegistryResolveRanges(t *testing.T) {
 	r.Freeze()
 
 	fs, err := r.Resolve("1.5.0")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
+	if !assert.NoError(t, err) {
+		return
 	}
-	if fs.Version() != "1.5.0" {
-		t.Fatalf("Version() = %q", fs.Version())
-	}
-	if !fs.Has("base") || !fs.Has("dark_mode") || !fs.Has("legacy_login") {
-		t.Fatalf("expected all features at 1.5.0, got %#v", fs.All())
-	}
-	if !fs.HasAll("base", "dark_mode") {
-		t.Fatalf("HasAll returned false")
-	}
-	if !fs.HasAny("missing", "legacy_login") {
-		t.Fatalf("HasAny returned false")
-	}
-	if fs.Has("missing") {
-		t.Fatalf("unexpected missing feature")
-	}
+	assert.Equal(t, "1.5.0", fs.Version())
+	assert.True(t, fs.Has("base"))
+	assert.True(t, fs.Has("dark_mode"))
+	assert.True(t, fs.Has("legacy_login"))
+	assert.True(t, fs.HasAll("base", "dark_mode"))
+	assert.True(t, fs.HasAny("missing", "legacy_login"))
+	assert.False(t, fs.Has("missing"))
 
 	fs, err = r.Resolve("2.0.0")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
+	if !assert.NoError(t, err) {
+		return
 	}
-	if fs.Has("legacy_login") {
-		t.Fatalf("legacy_login should be removed at exclusive upper bound")
-	}
-	if !fs.HasAll("base", "dark_mode") {
-		t.Fatalf("base and dark_mode should still be supported")
-	}
+	assert.False(t, fs.Has("legacy_login"))
+	assert.True(t, fs.HasAll("base", "dark_mode"))
 }
 
 func TestRegistryResolvePrerelease(t *testing.T) {
@@ -53,24 +42,18 @@ func TestRegistryResolvePrerelease(t *testing.T) {
 
 	r := NewRegistry[string]().Register("feature", "1.2.3")
 	fs, err := r.Resolve("1.2.3-rc.1")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
+	if !assert.NoError(t, err) {
+		return
 	}
-	if fs.Has("feature") {
-		t.Fatalf("prerelease should compare lower than final release by default")
-	}
+	assert.False(t, fs.Has("feature"))
 
 	r = NewRegistry[string](WithIgnorePrerelease()).Register("feature", "1.2.3")
 	fs, err = r.Resolve("1.2.3-rc.1")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
+	if !assert.NoError(t, err) {
+		return
 	}
-	if !fs.Has("feature") {
-		t.Fatalf("WithIgnorePrerelease should treat rc as final release")
-	}
-	if fs.Version() != "1.2.3" {
-		t.Fatalf("Version() = %q, want normalized 1.2.3", fs.Version())
-	}
+	assert.True(t, fs.Has("feature"))
+	assert.Equal(t, "1.2.3", fs.Version())
 }
 
 func TestFreezeEnablesCacheAndRejectsRegister(t *testing.T) {
@@ -79,18 +62,14 @@ func TestFreezeEnablesCacheAndRejectsRegister(t *testing.T) {
 	r := NewRegistry[string]().Register("feature", "1.0.0")
 	beforeA := r.MustResolve("1.0.0")
 	beforeB := r.MustResolve("1.0.0")
-	if beforeA == beforeB {
-		t.Fatalf("unfrozen registry should recompute feature sets")
-	}
+	assert.NotSame(t, beforeA, beforeB)
 
 	r.Freeze()
 	a := r.MustResolve("1.0.0")
 	b := r.MustResolve("1.0.0")
-	if a != b {
-		t.Fatalf("frozen registry should return cached feature set for same version")
-	}
+	assert.Same(t, a, b)
 
-	assertPanic(t, func() { r.Register("other", "1.0.0") })
+	assert.Panics(t, func() { r.Register("other", "1.0.0") })
 }
 
 func TestConcurrentResolveAfterFreeze(t *testing.T) {
@@ -117,16 +96,12 @@ func TestConcurrentResolveAfterFreeze(t *testing.T) {
 
 	var first *FeatureSet[int]
 	for set := range sets {
-		if len(set.All()) != 100 {
-			t.Fatalf("expected 100 features, got %d", len(set.All()))
-		}
+		assert.Len(t, set.All(), 100)
 		if first == nil {
 			first = set
 			continue
 		}
-		if first != set {
-			t.Fatalf("expected all goroutines to observe same cached set pointer")
-		}
+		assert.Same(t, first, set)
 	}
 }
 
@@ -138,46 +113,42 @@ func TestSinceUntilDump(t *testing.T) {
 		RegisterRange("alpha", "1.1.0", "2.0.0")
 
 	since, ok := r.SinceOf("alpha")
-	if !ok || since != "1.1.0" {
-		t.Fatalf("SinceOf(alpha) = %q, %v", since, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "1.1.0", since)
+
 	until, ok := r.UntilOf("alpha")
-	if !ok || until != "2.0.0" {
-		t.Fatalf("UntilOf(alpha) = %q, %v", until, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "2.0.0", until)
+
 	until, ok = r.UntilOf("zeta")
-	if !ok || until != "latest" {
-		t.Fatalf("UntilOf(zeta) = %q, %v", until, ok)
-	}
-	if _, ok := r.SinceOf("missing"); ok {
-		t.Fatalf("missing feature should not exist")
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "latest", until)
+
+	_, ok = r.SinceOf("missing")
+	assert.False(t, ok)
 
 	want := []FeatureRange[string]{
 		{Feature: "alpha", Since: "1.1.0", Until: "2.0.0"},
 		{Feature: "zeta", Since: "1.0.0", Until: "latest"},
 	}
-	if got := r.Dump(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("Dump() = %#v, want %#v", got, want)
-	}
+	assert.Equal(t, want, r.Dump())
 }
 
 func TestValidationPanicsAndErrors(t *testing.T) {
 	t.Parallel()
 
-	assertPanic(t, func() { NewRegistry[string]().Register("bad", "1.2") })
-	assertPanic(t, func() { NewRegistry[string]().RegisterRange("bad", "1.0.0", "") })
-	assertPanic(t, func() { NewRegistry[string]().RegisterRange("bad", "2.0.0", "1.0.0") })
-	assertPanic(t, func() {
+	assert.Panics(t, func() { NewRegistry[string]().Register("bad", "1.2") })
+	assert.Panics(t, func() { NewRegistry[string]().RegisterRange("bad", "1.0.0", "") })
+	assert.Panics(t, func() { NewRegistry[string]().RegisterRange("bad", "2.0.0", "1.0.0") })
+	assert.Panics(t, func() {
 		NewRegistry[string]().
 			Register("dup", "1.0.0").
 			Register("dup", "1.1.0")
 	})
 
-	if _, err := NewRegistry[string]().Resolve("1.2"); err == nil {
-		t.Fatalf("Resolve should reject invalid semver")
-	}
-	assertPanic(t, func() { NewRegistry[string]().MustResolve("1.2") })
+	_, err := NewRegistry[string]().Resolve("1.2")
+	assert.Error(t, err)
+	assert.Panics(t, func() { NewRegistry[string]().MustResolve("1.2") })
 }
 
 func TestFeatureSetHelpers(t *testing.T) {
@@ -190,16 +161,16 @@ func TestFeatureSetHelpers(t *testing.T) {
 
 	all := fs.All()
 	sort.Strings(all)
-	if !reflect.DeepEqual(all, []string{"a", "b"}) {
-		t.Fatalf("All() = %#v", all)
-	}
+	assert.Equal(t, []string{"a", "b"}, all)
 	fs.MustHave("a")
-	assertPanic(t, func() { fs.MustHave("missing") })
+	assert.Panics(t, func() { fs.MustHave("missing") })
 
 	var nilSet *FeatureSet[string]
-	if nilSet.Version() != "" || nilSet.Has("x") || nilSet.HasAny("x") || !nilSet.HasAll() || nilSet.All() != nil {
-		t.Fatalf("nil FeatureSet helpers returned unexpected values")
-	}
+	assert.Empty(t, nilSet.Version())
+	assert.False(t, nilSet.Has("x"))
+	assert.False(t, nilSet.HasAny("x"))
+	assert.True(t, nilSet.HasAll())
+	assert.Nil(t, nilSet.All())
 }
 
 func TestDefaultRegistry(t *testing.T) {
@@ -212,29 +183,17 @@ func TestDefaultRegistry(t *testing.T) {
 	Freeze()
 
 	fs, err := Resolve("1.2.0-rc.1")
-	if err != nil {
-		t.Fatalf("Resolve returned error: %v", err)
+	if !assert.NoError(t, err) {
+		return
 	}
-	if !fs.HasAll("dark_mode", "legacy_login") {
-		t.Fatalf("default registry did not resolve expected features")
-	}
-	if since, ok := SinceOf("dark_mode"); !ok || since != "1.2.0" {
-		t.Fatalf("SinceOf(default) = %q, %v", since, ok)
-	}
-	if got := Dump(); len(got) != 2 {
-		t.Fatalf("Dump(default) length = %d", len(got))
-	}
-	assertPanic(t, func() { ConfigureDefault() })
-}
+	assert.True(t, fs.HasAll("dark_mode", "legacy_login"))
 
-func assertPanic(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	fn()
+	since, ok := SinceOf("dark_mode")
+	assert.True(t, ok)
+	assert.Equal(t, "1.2.0", since)
+
+	assert.Len(t, Dump(), 2)
+	assert.Panics(t, func() { ConfigureDefault() })
 }
 
 func resetDefaultRegistryForTest() {
