@@ -131,7 +131,7 @@ func (r *Registry[F]) Resolve(version string) (*FeatureSet[F], error) {
 	r.mu.RUnlock()
 
 	if !frozen {
-		return r.computeFeatureSet(key, parsed), nil
+		return r.resolveParsed(key, parsed), nil
 	}
 
 	r.mu.Lock()
@@ -142,6 +142,16 @@ func (r *Registry[F]) Resolve(version string) (*FeatureSet[F], error) {
 	set := r.computeFeatureSetLocked(key, parsed)
 	r.cache[key] = set
 	return set, nil
+}
+
+func (r *Registry[F]) resolve(version string) (*FeatureSet[F], error) {
+	r.mustNotBeNil()
+
+	parsed, key, err := r.parseResolveVersion(version)
+	if err != nil {
+		return nil, err
+	}
+	return r.resolveParsed(key, parsed), nil
 }
 
 // MustResolve is like Resolve but panics on invalid version.
@@ -238,6 +248,10 @@ func (r *Registry[F]) parseResolveVersion(version string) (*semver.Version, stri
 		return nil, "", fmt.Errorf("semverflags: invalid normalized version %q: %w", normalized, err)
 	}
 	return withoutPrerelease, withoutPrerelease.String(), nil
+}
+
+func (r *Registry[F]) resolveParsed(version string, parsed *semver.Version) *FeatureSet[F] {
+	return r.computeFeatureSet(version, parsed)
 }
 
 func (r *Registry[F]) computeFeatureSet(version string, parsed *semver.Version) *FeatureSet[F] {
