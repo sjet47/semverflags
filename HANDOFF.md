@@ -1,19 +1,25 @@
 ### TL;DR
-下一步：基于当前 benchmark，优化 `Resolve` 在“最新版本命中大多数 feature”场景下的冷查询性能。
+Autoresearch 可暂停：当前最佳 `resolve_10000_ns` 从 baseline ~409,491 ns/op 优化到 ~20 ns/op。
 
 ### 全局事实
-- 当前冷查询基准在 `registry_benchmark_test.go`：注册离散 feature，10% 老 feature 在新版本移除，查询最新版本。
-- `Resolve` 是 exported 缓存层；unexported `resolve` 默认不走缓存，benchmark 直接调用 `resolve`，避免缓存命中干扰。
-- 当前计算逻辑仍是遍历所有 registered feature，复杂度约 `O(n)`。
-- 目标优化方向：`Freeze()` 后构建版本断点/区间索引；最新版本走 fast path；普通版本二分定位区间；FeatureSet 尽量复用不可变 backing。
+- 实验配置在 `autoresearch.md`，运行脚本 `autoresearch.sh`，检查脚本 `autoresearch.checks.sh`，日志 `autoresearch.jsonl`。
+- Primary metric：`resolve_10000_ns`，越低越好；benchmark 直接调用 unexported `resolve` 避免 exported cache 命中。
+- 已保留主要优化提交：
+  - `7a74cae`：Freeze 预计算 latest interval，共享 active feature map。
+  - `f2a8ba8`：latest stable version 先走轻量 parser，避免 semver allocation。
+  - `73236ea`：internal resolve 读取 immutable latest index 时跳过锁。
+  - `36c9fab`：内联 stable semver core parser。
+  - `01f00ff`：single-digit minor/patch fast path。
+  - `d6c96e1`：single-digit fast path 只处理 plain stable，metadata 回落通用 parser。
+  - `0bae562`：major 超过 latest breakpoint 时短路比较。
+  - `65fadd9`：在完整 parser 前内联 high-major plain `x.d.d` latest fast path，当前最佳约 20 ns/op、24 B/op、1 alloc/op。
+- 多个 parser/layout 微优化已 discard，详见 `autoresearch.jsonl`；不要重复尝试。
+- `autoresearch.ideas.md` 记录了非 latest 版本完整 breakpoint interval index 方案；它可能优化旧版本查询，但当前 primary 不覆盖。
 
 ### WIP
-当前子任务：实现 Resolve 索引优化。
-- 优先保持公开 API 和既有行为不变。
-- 重点优化 latest 区间：当 version >= 最后一个断点时，避免遍历全部 feature。
-- 需要兼容 `RegisterRange` 的移除语义 `[since, until)`。
+当前无正在编辑的代码；最后一轮实验已完成并 keep。工作区可能还有 autoresearch 记录文件更新。
 
 ### TODO
-- 设计并实现 Freeze 阶段的断点索引结构。
-- 调整 frozen 后 `Resolve`/`resolve` 计算路径使用索引。
-- 跑 `go test ./...` 和现有 benchmark，对比优化前后结果。
+- 如要收尾：运行一次 `git status`，按需整理/提交或归档 autoresearch 记录。
+- 如继续优化 primary：剩余成本主要是 `FeatureSet` 返回对象的 1 次 allocation；需谨慎，避免改变语义/并发安全。
+- 如扩展优化范围：先明确是否把 older-version cold resolve 纳入 primary/secondary，并重新初始化实验目标。

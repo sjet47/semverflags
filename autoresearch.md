@@ -36,5 +36,6 @@ The benchmark intentionally calls unexported `resolve` so each iteration measure
 - Kept: `Freeze()` now precomputes the latest interval as an immutable index. For versions at or beyond the max registered `since`/`until` breakpoint, active features are exactly unbounded ranges, so latest resolves can share that map instead of scanning all entries.
 - Kept: internal no-cache `resolve` reads the immutable latest index without locking; exported `Resolve` still has its cache locking layer.
 - Kept: latest stable versions use a conservative fast parser for `x.y.z` with optional build metadata before falling back to Masterminds semver. This reduced the primary to ~24 ns/op and 1 allocation.
-- Discarded: caching numeric latest breakpoint fields and inlining FeatureSet construction; no rounded primary improvement.
-- Discarded: index-based and compare-fused stable parsers; both regressed.
+- Kept: added focused fast paths for common latest stable releases: single-digit minor/patch, plain stable `x.d.d`, and high-major versions above the latest breakpoint. Current best is ~20 ns/op, 24 B/op, 1 alloc/op.
+- Discarded: caching numeric latest breakpoint fields, inlining FeatureSet construction, FeatureSet layout changes, and removing defensive helper branches; no rounded primary improvement.
+- Discarded: index-based, delimiter-search, compare-fused, major-string, and tail-validation parser variants; all regressed or failed to improve the primary metric.
