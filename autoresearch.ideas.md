@@ -1,2 +1,0 @@
-- Implement full breakpoint interval index for non-latest cold resolves: sort since/until events at Freeze, binary-search interval on resolve, and lazily cache shared interval feature maps. This should improve older version queries but is not currently captured by the primary latest benchmark.
-- Consider a more precise benchmark metric (decimal ns/op instead of rounded integer) only if pursuing sub-nanosecond cleanups; avoid changing workload semantics mid-session.
