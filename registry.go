@@ -28,6 +28,7 @@ type FeatureRange[F comparable] struct {
 // for concurrent Resolve calls.
 type latestIndex[F comparable] struct {
 	breakpoint *semver.Version
+	major      uint64
 	features   map[F]struct{}
 }
 
@@ -282,6 +283,7 @@ func (r *Registry[F]) buildLatestIndexLocked() {
 	}
 	r.latest = &latestIndex[F]{
 		breakpoint: breakpoint,
+		major:      breakpoint.Major(),
 		features:   latestFeatures,
 	}
 }
@@ -295,7 +297,10 @@ func (r *Registry[F]) resolveLatestStable(version string) (*FeatureSet[F], bool)
 	if !ok {
 		return nil, false
 	}
-	if compareStableCoreToVersion(major, minor, patch, latest.breakpoint) < 0 {
+	if major > latest.major {
+		return newFeatureSet(version, latest.features), true
+	}
+	if major < latest.major || compareStableCoreToVersion(major, minor, patch, latest.breakpoint) < 0 {
 		return nil, false
 	}
 	return newFeatureSet(version, latest.features), true
